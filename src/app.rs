@@ -86,6 +86,7 @@ pub fn get_installed_apps(dir: impl AsRef<Path>) -> Vec<App> {
         .collect()
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct App {
     open_command: String,
@@ -178,6 +179,7 @@ impl Tile {
         let mut apps = get_installed_apps("/Applications/");
         apps.append(&mut get_installed_apps("/System/Applications/"));
         apps.append(&mut get_installed_apps("/System/Applications/Utilities/"));
+        apps.sort_by_key(|x| x.name.len() );
 
         (
             Self {
@@ -203,13 +205,26 @@ impl Tile {
 
             Message::SearchQueryChanged(input, id) => {
                 self.query = input;
+                let mut results = vec![];
 
-                self.results = self
+                results.append(
+                    &mut self
+                        .options
+                        .iter()
+                        .filter(|x| x.name.to_lowercase() == self.query.to_lowercase())
+                        .map(|x| x.to_owned())
+                        .collect(),
+                );
+
+                results.append(&mut self
                     .options
                     .iter()
+                    .filter(|x| x.name.to_lowercase() != self.query.to_lowercase())
                     .filter(|x| x.name.to_lowercase().contains(&self.query.to_lowercase()))
-                    .map(|x| x.to_owned())
-                    .collect();
+                    .map(|x| x.to_owned()).collect()
+                    );
+
+                self.results = results;
 
                 let query_count = self.query.chars().count();
                 if query_count == 0 {
@@ -319,10 +334,8 @@ impl Tile {
                 } = event
                 {
                     match key {
-                        keyboard::Key::Named(Named::Escape) => {
-                            Some(Message::KeyPressed(65598))
-                        }
-                        _ => None
+                        keyboard::Key::Named(Named::Escape) => Some(Message::KeyPressed(65598)),
+                        _ => None,
                     }
                 } else {
                     None
