@@ -26,6 +26,8 @@
 
 - [x] Autoload installed apps 11/11/2025
 - [x] Search through apps 11/11/2025
+- [x] Generate [randomvar](https://github.com/Nazeofel) (between 0 and 100) via
+      the app. Simply type `randomvar` and it will generate the num for you
 
 ## Motivations:
 
