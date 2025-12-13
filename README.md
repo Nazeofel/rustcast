@@ -14,19 +14,24 @@
 3. Open it, and if there is a "this app is damaged", run the command
    `xattr -cr <RustCast.app directory here>`
 
+## Config:
+
+The config file should be located at: `~/.config/rustcast/config.toml` RustCast
+doesn't create the default configuration for you, but it does use its
+[default options](docs/default.toml) Here's a full list of what all you can
+configure [The list](docs/config.toml) The blurring and background is still a
+bit wonky, and will be fixed in the upcoming releases
+
 ## Feature list:
 
 ### Planned:
 
-- [ ] Tray Icon for quitting the app 12/12/2025
 - [ ] Select the options using arrow keys 13/12/2025
 - [ ] Calculator 15/12/2025
 - [ ] Popup note-taking 18/12/2025
 - [ ] Clipboard History 20/12/2025
-- [ ] Customisable themes (21/12/2025)
-  - [ ] Blur / transparent background
-  - [ ] Configurable colours for selected option
 - [ ] Plugin Support 31/12/2025
+- [ ] Blur / transparent background (Partially implemented on 13/12/2025)
 
 ### Finished:
 
@@ -36,6 +41,13 @@
       the app. Simply type `randomvar` and it will generate the num for you
 - [x] Image icons next to the text 13/12/2025
 - [x] Scrollable options 12/12/2025
+- [x] Customisable themes (13/12/2025)
+  - [x] Configurable colours
+
+### Not Planned:
+
+- [ ] Tray Icon for quitting the app. One may ask why? Well, because I CAN'T GET
+      IT TO WORK.. I've SPENT TOO LONG ON THIS
 
 ## Motivations:
 

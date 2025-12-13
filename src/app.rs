@@ -1,208 +1,56 @@
-use crate::macos;
+use crate::config::Config;
 use crate::macos::focus_this_app;
+use crate::{macos, utils::get_installed_apps};
 
 use global_hotkey::{GlobalHotKeyEvent, HotKeyState};
-use iced::Alignment;
-use iced::Fill;
-use iced::alignment::Vertical;
-use iced::futures;
-use iced::keyboard;
-use iced::keyboard::key::Named;
-use iced::stream;
-use iced::widget::Button;
-use iced::widget::Row;
-use iced::widget::Text;
-use iced::widget::container;
-use iced::widget::image::Handle;
-use iced::widget::image::Viewer;
-use iced::widget::scrollable;
-use iced::widget::text::LineHeight;
-use iced::widget::{Column, operation, space, text_input};
-use iced::window::{self, Id, Settings};
-use iced::{Element, Subscription, Task, Theme};
-use icns::IconFamily;
-use image::RgbaImage;
+use iced::{
+    Alignment, Element, Fill, Subscription, Task, Theme,
+    alignment::Vertical,
+    futures,
+    keyboard::{self, key::Named},
+    stream,
+    widget::{
+        Button, Column, Row, Text, container, image::Viewer, operation, scrollable, space,
+        text::LineHeight, text_input,
+    },
+    window::{self, Id, Settings},
+};
+
 use objc2::rc::Retained;
 use objc2_app_kit::NSRunningApplication;
 
 use std::cmp::min;
-use std::fs;
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
 use std::process::Command;
-use std::process::exit;
 use std::time::Duration;
 
-const WINDOW_WIDTH: f32 = 500.;
-const DEFAULT_WINDOW_HEIGHT: f32 = 65.;
-const ERR_LOG_PATH: &str = "/tmp/rustscan-err.log";
-
-fn log_error(msg: &str) {
-    if let Ok(mut file) = File::options().create(true).append(true).open(ERR_LOG_PATH) {
-        let _ = file.write_all(msg.as_bytes()).ok();
-    }
-}
-
-fn log_error_and_exit(msg: &str) {
-    log_error(msg);
-    exit(-1)
-}
-
-fn handle_from_icns(path: &Path) -> Option<Handle> {
-    let data = std::fs::read(path).ok()?;
-    let family = IconFamily::read(std::io::Cursor::new(&data)).ok()?;
-
-    let icon_type = family.available_icons();
-
-    let icon = family.get_icon_with_type(*icon_type.first()?).ok()?;
-    let image = RgbaImage::from_raw(
-        icon.width() as u32,
-        icon.height() as u32,
-        icon.data().to_vec(),
-    )?;
-    Some(Handle::from_rgba(
-        image.width(),
-        image.height(),
-        image.into_raw(),
-    ))
-}
-
-pub fn get_installed_apps(dir: impl AsRef<Path>) -> Vec<App> {
-    fs::read_dir(dir)
-        .unwrap_or_else(|x| {
-            log_error_and_exit(&x.to_string());
-            exit(-1)
-        })
-        .filter_map(|x| x.ok())
-        .filter_map(|x| {
-            let file_type = x.file_type().unwrap_or_else(|e| {
-                log_error(&e.to_string());
-                exit(-1)
-            });
-
-            if !file_type.is_dir() {
-                return None;
-            }
-
-            let file_name_os = x.file_name();
-            let file_name = file_name_os.into_string().unwrap_or_else(|e| {
-                log_error(e.to_str().unwrap_or(""));
-                exit(-1)
-            });
-
-            if !file_name.ends_with(".app") {
-                return None;
-            }
-
-            let path_str = x.path().to_str().map(|x| x.to_string()).unwrap_or_else(|| {
-                log_error("Unable to get file_name");
-                exit(-1)
-            });
-
-            let icons = match fs::read_to_string(format!("{}/Contents/Info.plist", path_str)).map(
-                |content| {
-                    let icon_line = content
-                        .lines()
-                        .scan(false, |expect_next, line| {
-                            if *expect_next {
-                                *expect_next = false;
-                                // Return this line to the iterator
-                                return Some(Some(line));
-                            }
-
-                            if line.trim() == "<key>CFBundleIconFile</key>" {
-                                *expect_next = true;
-                            }
-
-                            // For lines that are not the one after the key, return None to skip
-                            Some(None)
-                        })
-                        .flatten() // remove the Nones
-                        .next()
-                        .map(|x| {
-                            x.trim()
-                                .strip_prefix("<string>")
-                                .unwrap_or("")
-                                .strip_suffix("</string>")
-                                .unwrap_or("")
-                        });
-
-                    handle_from_icns(Path::new(&format!(
-                        "{}/Contents/Resources/{}",
-                        path_str,
-                        icon_line.unwrap_or("AppIcon.icns")
-                    )))
-                },
-            ) {
-                Ok(Some(a)) => Some(a),
-                _ => {
-                    // Fallback method
-                    let direntry = fs::read_dir(format!("{}/Contents/Resources", path_str))
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|x| {
-                            let file = x.ok()?;
-                            let name = file.file_name();
-                            let file_name = name.to_str()?;
-                            if file_name.ends_with(".icns") {
-                                Some(file.path())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<PathBuf>>();
-                    let icons = if direntry.len() > 1 {
-                        let icns_vec = direntry
-                            .iter()
-                            .filter(|x| x.ends_with("AppIcon.icns"))
-                            .collect::<Vec<&PathBuf>>();
-                        handle_from_icns(icns_vec.first().unwrap_or(&&PathBuf::new()))
-                    } else if !direntry.is_empty() {
-                        handle_from_icns(direntry.first().unwrap_or(&PathBuf::new()))
-                    } else {
-                        None
-                    };
-                    icons
-                }
-            };
-
-            let name = file_name.strip_suffix(".app").unwrap().to_string();
-
-            Some(App {
-                open_command: format!("open {}", path_str),
-                icons,
-                name_lc: name.to_lowercase(),
-                name,
-            })
-        })
-        .collect()
-}
+pub const WINDOW_WIDTH: f32 = 500.;
+pub const DEFAULT_WINDOW_HEIGHT: f32 = 65.;
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct App {
-    open_command: String,
-    icons: Option<iced::widget::image::Handle>,
-    name: String,
-    name_lc: String,
+    pub open_command: String,
+    pub icons: Option<iced::widget::image::Handle>,
+    pub name: String,
+    pub name_lc: String,
 }
 
 impl App {
-    pub fn render(&self) -> impl Into<iced::Element<'_, Message>> {
+    pub fn render(&self, show_icons: bool) -> impl Into<iced::Element<'_, Message>> {
         let mut tile = Row::new().width(Fill).height(55);
 
-        if let Some(icon) = &self.icons {
-            tile = tile
-                .push(Viewer::new(icon).height(35).width(35))
-                .align_y(Alignment::Center);
-        } else {
-            tile = tile
-                .push(space().height(Fill))
-                .width(55)
-                .height(55)
-                .align_y(Alignment::Center);
+        if show_icons {
+            if let Some(icon) = &self.icons {
+                tile = tile
+                    .push(Viewer::new(icon).height(35).width(35))
+                    .align_y(Alignment::Center);
+            } else {
+                tile = tile
+                    .push(space().height(Fill))
+                    .width(55)
+                    .height(55)
+                    .align_y(Alignment::Center);
+            }
         }
 
         tile = tile
@@ -251,21 +99,6 @@ pub enum Message {
     _Nothing,
 }
 
-#[derive(Debug, Clone)]
-pub enum Hotkeys {
-    AltSpace,
-    Nothing,
-}
-
-impl Hotkeys {
-    pub fn from_u32_hotkey_id(id: u32) -> Hotkeys {
-        match id {
-            65598 => Hotkeys::AltSpace,
-            _ => Hotkeys::Nothing,
-        }
-    }
-}
-
 pub fn default_settings() -> Settings {
     Settings {
         resizable: false,
@@ -284,20 +117,23 @@ pub fn default_settings() -> Settings {
 
 #[derive(Debug, Clone)]
 pub struct Tile {
+    theme: iced::Theme,
     query: String,
     query_lc: String,
     prev_query_lc: String,
-    theme: Theme,
     results: Vec<App>,
     options: Vec<App>,
     visible: bool,
     focused: bool,
     frontmost: Option<Retained<NSRunningApplication>>,
+    config: Config,
+    default_config: Config,
+    open_hotkey_id: u32,
 }
 
 impl Tile {
     /// A base window
-    pub fn new() -> (Self, Task<Message>) {
+    pub fn new(keybind_id: u32, config: &Config) -> (Self, Task<Message>) {
         let (id, open) = window::open(default_settings());
         let _ = window::run(id, |handle| {
             macos::macos_window_config(
@@ -305,14 +141,29 @@ impl Tile {
             );
         });
 
-        let mut apps = get_installed_apps("/Applications/");
-        apps.append(&mut get_installed_apps("/System/Applications/"));
-        apps.append(&mut get_installed_apps("/System/Applications/Utilities/"));
+        // SHOULD NEVER HAVE NONE VALUES
+        let default_config = Config::default();
+
+        let store_icons = config
+            .theme
+            .as_ref()
+            .unwrap_or(default_config.theme.as_ref().unwrap())
+            .show_icons
+            .unwrap();
+
+        let mut apps = get_installed_apps("/Applications/", store_icons);
+        apps.append(&mut get_installed_apps(
+            "/System/Applications/",
+            store_icons,
+        ));
+        apps.append(&mut get_installed_apps(
+            "/System/Applications/Utilities/",
+            store_icons,
+        ));
         apps.sort_by_key(|x| x.name.len());
 
         (
             Self {
-                theme: Theme::KanagawaWave,
                 query: String::new(),
                 query_lc: String::new(),
                 prev_query_lc: String::new(),
@@ -321,6 +172,10 @@ impl Tile {
                 visible: true,
                 frontmost: None,
                 focused: false,
+                config: config.clone(),
+                default_config,
+                theme: config.theme.to_owned().unwrap().to_iced_theme(),
+                open_hotkey_id: keybind_id,
             },
             Task::batch([open.map(|_| Message::OpenWindow)]),
         )
@@ -364,29 +219,7 @@ impl Tile {
                     );
                 }
 
-                let filter_vec = if self.query_lc.starts_with(&self.prev_query_lc) {
-                    self.prev_query_lc = self.query_lc.to_owned();
-                    &self.results.clone()
-                } else {
-                    &self.options
-                };
-
-                self.results = vec![];
-                self.results.extend(
-                    &mut filter_vec
-                        .iter()
-                        .filter(|x| x.name_lc == self.query_lc)
-                        .map(|x| x.to_owned()),
-                );
-
-                self.results.extend(
-                    &mut filter_vec
-                        .iter()
-                        .filter(|x| {
-                            x.name_lc != self.query_lc && x.name_lc.starts_with(&self.query_lc)
-                        })
-                        .map(|x| x.to_owned()),
-                );
+                self.handle_search_query_changed();
                 let new_length = self.results.len();
 
                 let max_elem = min(5, new_length);
@@ -409,8 +242,8 @@ impl Tile {
                 Task::none()
             }
 
-            Message::KeyPressed(hk_id) => match Hotkeys::from_u32_hotkey_id(hk_id) {
-                Hotkeys::AltSpace => {
+            Message::KeyPressed(hk_id) => {
+                if hk_id == self.open_hotkey_id {
                     self.visible = !self.visible;
                     if self.visible {
                         Task::chain(
@@ -421,11 +254,34 @@ impl Tile {
                         )
                     } else {
                         let to_close = window::latest().map(|x| x.unwrap());
-                        to_close.map(Message::HideWindow)
+                        Task::batch([
+                            to_close.map(Message::HideWindow),
+                            Task::done(
+                                if self
+                                    .config
+                                    .buffer_rules
+                                    .clone()
+                                    .and_then(|x| x.clear_on_hide)
+                                    .unwrap_or(
+                                        self.default_config
+                                            .buffer_rules
+                                            .clone()
+                                            .unwrap()
+                                            .clear_on_hide
+                                            .unwrap(),
+                                    )
+                                {
+                                    Message::ClearSearchQuery
+                                } else {
+                                    Message::_Nothing
+                                },
+                            ),
+                        ])
                     }
+                } else {
+                    Task::none()
                 }
-                _ => Task::none(),
-            },
+            }
 
             Message::RunShellCommand(shell_command) => {
                 let cmd = shell_command.split_once(" ").unwrap_or(("", ""));
@@ -433,7 +289,26 @@ impl Tile {
                 window::latest()
                     .map(|x| x.unwrap())
                     .map(Message::HideWindow)
-                    .chain(Task::done(Message::ClearSearchQuery))
+                    .chain({
+                        let buf_rules = self
+                            .config
+                            .buffer_rules
+                            .clone()
+                            .and_then(|x| x.clear_on_enter)
+                            .unwrap_or_else(|| {
+                                self.default_config
+                                    .buffer_rules
+                                    .clone()
+                                    .unwrap()
+                                    .clear_on_enter
+                                    .unwrap()
+                            });
+                        if buf_rules {
+                            Task::done(Message::ClearSearchQuery)
+                        } else {
+                            Task::none()
+                        }
+                    })
             }
 
             Message::HideWindow(a) => {
@@ -450,6 +325,7 @@ impl Tile {
                 self.focused = focused;
                 if !focused {
                     Task::done(Message::HideWindow(wid))
+                        .chain(Task::done(Message::ClearSearchQuery))
                 } else {
                     Task::none()
                 }
@@ -461,7 +337,7 @@ impl Tile {
 
     pub fn view(&self, wid: window::Id) -> Element<'_, Message> {
         if self.visible {
-            let title_input = text_input("Time to be productive!", &self.query)
+            let title_input = text_input(self.config.placeholder.as_ref().unwrap(), &self.query)
                 .on_input(move |a| Message::SearchQueryChanged(a, wid))
                 .on_paste(move |a| Message::SearchQueryChanged(a, wid))
                 .on_submit({
@@ -480,7 +356,8 @@ impl Tile {
 
             let mut search_results = Column::new();
             for result in &self.results {
-                search_results = search_results.push(result.render());
+                search_results = search_results
+                    .push(result.render(self.config.theme.clone().unwrap().show_icons.unwrap()));
             }
 
             Column::new()
@@ -500,7 +377,6 @@ impl Tile {
         Subscription::batch([
             Subscription::run(handle_hotkeys),
             window::close_events().map(Message::HideWindow),
-            window::resize_events().map(|_| Message::_Nothing),
             keyboard::listen().filter_map(|event| {
                 if let keyboard::Event::KeyPressed { key, .. } = event {
                     match key {
@@ -525,6 +401,30 @@ impl Tile {
                     _ => None,
                 }),
         ])
+    }
+
+    pub fn handle_search_query_changed(&mut self) {
+        let filter_vec = if self.query_lc.starts_with(&self.prev_query_lc) {
+            self.prev_query_lc = self.query_lc.to_owned();
+            &self.results.clone()
+        } else {
+            &self.options
+        };
+
+        self.results = vec![];
+        self.results.extend(
+            &mut filter_vec
+                .iter()
+                .filter(|x| x.name_lc == self.query_lc)
+                .map(|x| x.to_owned()),
+        );
+
+        self.results.extend(
+            &mut filter_vec
+                .iter()
+                .filter(|x| x.name_lc != self.query_lc && x.name_lc.starts_with(&self.query_lc))
+                .map(|x| x.to_owned()),
+        );
     }
 
     pub fn capture_frontmost(&mut self) {
