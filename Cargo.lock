@@ -3386,6 +3386,7 @@ dependencies = [
  "objc2-application-services",
  "objc2-foundation 0.3.2",
  "rand",
+ "rayon",
  "serde",
  "tokio",
  "toml",

@@ -18,6 +18,8 @@ use iced::{
 
 use objc2::rc::Retained;
 use objc2_app_kit::NSRunningApplication;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 
 use std::cmp::min;
 use std::process::Command;
@@ -154,22 +156,22 @@ impl Tile {
             .show_icons
             .unwrap();
 
-        let home = std::env::var("HOME").unwrap();
+        let user_local_path = std::env::var("HOME").unwrap() + "/Applications/";
 
-        let mut apps = get_installed_apps("/Applications/", store_icons);
-        apps.append(&mut get_installed_apps(
+        let paths = vec![
+            "/Applications/",
+            user_local_path.as_str(),
             "/System/Applications/",
-            store_icons,
-        ));
-        apps.append(&mut get_installed_apps(
-            home + "/Applications/",
-            store_icons,
-        ));
-        apps.append(&mut get_installed_apps(
             "/System/Applications/Utilities/",
-            store_icons,
-        ));
-        apps.sort_by_key(|x| x.name.len());
+        ];
+
+        let mut apps: Vec<App> = paths
+            .par_iter()
+            .map(|path| get_installed_apps(path, store_icons))
+            .flatten()
+            .collect();
+
+        apps.par_sort_by_key(|x| x.name.len());
 
         (
             Self {
@@ -413,27 +415,29 @@ impl Tile {
     }
 
     pub fn handle_search_query_changed(&mut self) {
-        let filter_vec = if self.query_lc.starts_with(&self.prev_query_lc) {
+        let filter_vec: &Vec<App> = if self.query_lc.starts_with(&self.prev_query_lc) {
             self.prev_query_lc = self.query_lc.to_owned();
-            &self.results.clone()
+            &self.results
         } else {
             &self.options
         };
 
-        self.results = vec![];
-        self.results.extend(
-            &mut filter_vec
-                .iter()
-                .filter(|x| x.name_lc == self.query_lc)
-                .map(|x| x.to_owned()),
-        );
+        let query = self.query_lc.clone();
 
-        self.results.extend(
-            &mut filter_vec
-                .iter()
-                .filter(|x| x.name_lc != self.query_lc && x.name_lc.starts_with(&self.query_lc))
-                .map(|x| x.to_owned()),
-        );
+        let mut exact: Vec<App> = filter_vec
+            .par_iter()
+            .filter(|x| x.name_lc == query)
+            .cloned()
+            .collect();
+
+        let mut prefix: Vec<App> = filter_vec
+            .par_iter()
+            .filter(|x| x.name_lc != query && x.name_lc.starts_with(&query))
+            .cloned()
+            .collect();
+
+        exact.append(&mut prefix);
+        self.results = exact;
     }
 
     pub fn capture_frontmost(&mut self) {

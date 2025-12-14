@@ -9,6 +9,7 @@ use global_hotkey::hotkey::Code;
 use iced::widget::image::Handle;
 use icns::IconFamily;
 use image::RgbaImage;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::app::App;
 
@@ -45,18 +46,21 @@ pub(crate) fn handle_from_icns(path: &Path) -> Option<Handle> {
 }
 
 pub(crate) fn get_installed_apps(dir: impl AsRef<Path>, store_icons: bool) -> Vec<App> {
-    fs::read_dir(dir)
+    let entries: Vec<_> = fs::read_dir(dir.as_ref())
         .unwrap_or_else(|x| {
             log_error_and_exit(&x.to_string());
             exit(-1)
         })
         .filter_map(|x| x.ok())
+        .collect();
+
+    entries
+        .into_par_iter()
         .filter_map(|x| {
             let file_type = x.file_type().unwrap_or_else(|e| {
                 log_error(&e.to_string());
                 exit(-1)
             });
-
             if !file_type.is_dir() {
                 return None;
             }
@@ -66,12 +70,12 @@ pub(crate) fn get_installed_apps(dir: impl AsRef<Path>, store_icons: bool) -> Ve
                 log_error(e.to_str().unwrap_or(""));
                 exit(-1)
             });
-
             if !file_name.ends_with(".app") {
                 return None;
             }
 
-            let path_str = x.path().to_str().map(|x| x.to_string()).unwrap_or_else(|| {
+            let path = x.path();
+            let path_str = path.to_str().map(|x| x.to_string()).unwrap_or_else(|| {
                 log_error("Unable to get file_name");
                 exit(-1)
             });
@@ -146,8 +150,8 @@ pub(crate) fn get_installed_apps(dir: impl AsRef<Path>, store_icons: bool) -> Ve
             } else {
                 None
             };
-            let name = file_name.strip_suffix(".app").unwrap().to_string();
 
+            let name = file_name.strip_suffix(".app").unwrap().to_string();
             Some(App {
                 open_command: format!("open {}", path_str),
                 icons,
