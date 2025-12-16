@@ -11,7 +11,7 @@ use icns::IconFamily;
 use image::RgbaImage;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::app::App;
+use crate::{app::App, commands::Function};
 
 const ERR_LOG_PATH: &str = "/tmp/rustscan-err.log";
 
@@ -153,7 +153,7 @@ pub(crate) fn get_installed_apps(dir: impl AsRef<Path>, store_icons: bool) -> Ve
 
             let name = file_name.strip_suffix(".app").unwrap().to_string();
             Some(App {
-                open_command: vec!["open".to_string(), format!(r#""{path_str}""#)],
+                open_command: Function::OpenApp(path_str),
                 icons,
                 name_lc: name.to_lowercase(),
                 name,

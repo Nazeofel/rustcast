@@ -1,3 +1,4 @@
+use crate::commands::Function;
 use crate::config::Config;
 use crate::macos::{focus_this_app, transform_process_to_ui_element};
 use crate::{macos, utils::get_installed_apps};
@@ -17,7 +18,8 @@ use iced::{
 };
 
 use objc2::rc::Retained;
-use objc2_app_kit::NSRunningApplication;
+use objc2_app_kit::{NSRunningApplication, NSWorkspace};
+use objc2_foundation::NSURL;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 
@@ -30,7 +32,7 @@ pub const DEFAULT_WINDOW_HEIGHT: f32 = 65.;
 
 #[derive(Debug, Clone)]
 pub struct App {
-    pub open_command: Vec<String>,
+    pub open_command: Function,
     pub icons: Option<iced::widget::image::Handle>,
     pub name: String,
     pub name_lc: String,
@@ -62,7 +64,7 @@ impl App {
                         .width(Fill)
                         .align_y(Vertical::Center),
                 )
-                .on_press(Message::RunShellCommand(self.open_command.clone()))
+                .on_press(Message::RunFunction(self.open_command.clone()))
                 .style(|_, _| iced::widget::button::Style {
                     background: Some(iced::Background::Color(
                         Theme::KanagawaDragon.palette().background,
@@ -93,7 +95,7 @@ pub enum Message {
     SearchQueryChanged(String, Id),
     KeyPressed(u32),
     HideWindow(Id),
-    RunShellCommand(Vec<String>),
+    RunFunction(Function),
     ClearSearchResults,
     WindowFocusChanged(Id, bool),
     ClearSearchQuery,
@@ -206,7 +208,7 @@ impl Tile {
                     );
                 } else if self.query_lc == "randomvar" {
                     self.results = vec![App {
-                        open_command: vec!["".to_string()],
+                        open_command: Function::RunShellCommand(vec!["".to_string()]),
                         icons: None,
                         name: rand::random_range(0..100).to_string(),
                         name_lc: String::new(),
@@ -263,12 +265,21 @@ impl Tile {
                 }
             }
 
-            Message::RunShellCommand(shell_command) => {
-                Command::new("sh")
-                    .arg("-c")
-                    .arg(shell_command.join(" "))
-                    .status()
-                    .ok();
+            Message::RunFunction(command) => {
+                match command {
+                    Function::OpenApp(path) => {
+                        NSWorkspace::new().openURL(&NSURL::fileURLWithPath(
+                            &objc2_foundation::NSString::from_str(&path),
+                        ));
+                    }
+                    Function::RunShellCommand(shell_command) => {
+                        Command::new("sh")
+                            .arg("-c")
+                            .arg(shell_command.join(" "))
+                            .status()
+                            .ok();
+                    }
+                }
 
                 if self.config.buffer_rules.clear_on_enter {
                     window::latest()
@@ -313,7 +324,7 @@ impl Tile {
                     if self.results.is_empty() {
                         Message::_Nothing
                     } else {
-                        Message::RunShellCommand(
+                        Message::RunFunction(
                             self.results.first().unwrap().to_owned().open_command,
                         )
                     }

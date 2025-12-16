@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use iced::{theme::Custom, widget::image::Handle};
 use serde::{Deserialize, Serialize};
 
-use crate::{app::App, utils::handle_from_icns};
+use crate::{app::App, commands::Function, utils::handle_from_icns};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -141,7 +141,7 @@ impl Shelly {
             })
             .flatten();
         App {
-            open_command: self_clone.command,
+            open_command: Function::RunShellCommand(self_clone.command),
             icons: icon,
             name: self_clone.alias,
             name_lc: self_clone.alias_lc,
