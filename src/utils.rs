@@ -378,11 +378,6 @@ pub fn open_application(path: &String) {
     }
 }
 
-struct WindowPos {
-    x: f32,
-    y: f32,
-}
-
 use crate::app::{DEFAULT_WINDOW_HEIGHT, WINDOW_WIDTH};
 pub fn open_on_focused_monitor() -> iced::Point {
     use windows::Win32::Foundation::POINT;
