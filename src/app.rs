@@ -197,7 +197,7 @@ impl Tile {
 
         let store_icons = config.theme.show_icons;
         let paths;
-        let user_local_path;
+        let user_local_path: String;
         #[cfg(target_os = "macos")]
         {
             user_local_path = std::env::var("HOME").unwrap() + "/Applications/";
