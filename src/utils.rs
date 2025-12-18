@@ -287,3 +287,82 @@ pub fn to_key_code(key_str: &str) -> Option<Code> {
         _ => None,
     }
 }
+
+pub fn get_config_installation_dir() -> String {
+    let path = if cfg!(target_os = "windows") {
+        std::env::var("LOCALAPPDATA").unwrap()
+    } else {
+        std::env::var("HOME").unwrap()
+    };
+
+    return path;
+}
+
+pub fn get_config_file_path() -> String {
+    let home = get_config_installation_dir();
+    let file_path = if cfg!(target_os = "windows") {
+        home + "\\rustcast\\config.toml"
+    } else {
+        home + "/.rustcast/config.toml"
+    };
+
+    return file_path;
+}
+use crate::config::Config;
+
+pub fn read_config_file(file_path: &str) -> Result<Config, std::io::Error> {
+    let config: Config = match std::fs::read_to_string(&file_path) {
+        Ok(a) => toml::from_str(&a).unwrap(),
+        Err(_) => Config::default(),
+    };
+
+    Ok(config)
+}
+
+pub fn create_config_file(file_path: &str, config: &Config) -> Result<(), std::io::Error> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::Path;
+        let path = Path::new(&file_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::fs::create_dir_all(&file_path).unwrap();
+    }
+    std::fs::write(
+        &file_path,
+        toml::to_string(&config).unwrap_or_else(|x| x.to_string()),
+    )
+    .unwrap();
+
+    Ok(())
+}
+
+pub fn open_application(path: &String) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+
+        println!("Opening application: {}", path);
+
+        Command::new("powershell")
+            .arg(format!("Start-Process '{}'", path))
+            .status()
+            .ok();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        NSWorkspace::new().openURL(&NSURL::fileURLWithPath(
+            &objc2_foundation::NSString::from_str(path),
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open").arg(path).status().ok();
+    }
+}

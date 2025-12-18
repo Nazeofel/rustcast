@@ -1,10 +1,14 @@
 use std::process::Command;
 
 use arboard::Clipboard;
+
+#[cfg(target_os = "macos")]
 use objc2_app_kit::NSWorkspace;
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSURL;
 
 use crate::config::Config;
+use crate::utils::{get_config_file_path, open_application};
 
 #[derive(Debug, Clone)]
 pub enum Function {
@@ -20,9 +24,7 @@ impl Function {
     pub fn execute(&self, config: &Config) {
         match self {
             Function::OpenApp(path) => {
-                NSWorkspace::new().openURL(&NSURL::fileURLWithPath(
-                    &objc2_foundation::NSString::from_str(path),
-                ));
+                open_application(path);
             }
             Function::RunShellCommand(shell_command) => {
                 Command::new("sh")
@@ -40,22 +42,30 @@ impl Function {
 
             Function::GoogleSearch(query_string) => {
                 let query_args = query_string.replace(" ", "+");
-                let query = config.search_url.replace("%s", &query_args);
-                NSWorkspace::new().openURL(
-                    &NSURL::URLWithString_relativeToURL(
-                        &objc2_foundation::NSString::from_str(&query),
-                        None,
-                    )
-                    .unwrap(),
-                );
+                let mut query = config.search_url.replace("%s", &query_args);
+                query = query[..query.len() - 1].to_string();
+                #[cfg(target_os = "windows")]
+                {
+                    Command::new("powershell")
+                        .args(["-Command", &format!("Start-Process {}", query)])
+                        .status()
+                        .ok();
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    NSWorkspace::new().openURL(
+                        &NSURL::URLWithString_relativeToURL(
+                            &objc2_foundation::NSString::from_str(&query),
+                            None,
+                        )
+                        .unwrap(),
+                    );
+                };
             }
 
             Function::OpenPrefPane => {
                 Command::new("open")
-                    .arg(
-                        std::env::var("HOME").unwrap_or("".to_string())
-                            + "/.config/rustcast/config.toml",
-                    )
+                    .arg(get_config_file_path())
                     .spawn()
                     .ok();
             }
